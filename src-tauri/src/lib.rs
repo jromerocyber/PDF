@@ -57,6 +57,11 @@ async fn http_post(url: String, body: String, content_type: String) -> Result<St
 #[tauri::command]
 async fn save_file(app: tauri::AppHandle, name: String, data: String) -> Result<bool, String> {
     let bytes = B64.decode(data).map_err(|e| e.to_string())?;
+    // Pruebas automáticas: guardar sin diálogo en la carpeta indicada.
+    if let Ok(dir) = std::env::var("PDFSTUDIO_SAVE_DIR") {
+        std::fs::write(std::path::Path::new(&dir).join(&name), bytes).map_err(|e| e.to_string())?;
+        return Ok(true);
+    }
     let ext = std::path::Path::new(&name).extension().and_then(|e| e.to_str()).unwrap_or("pdf").to_string();
     let path = app.dialog().file().set_file_name(&name).add_filter(ext.to_uppercase(), &[ext.as_str()]).blocking_save_file();
     match path {

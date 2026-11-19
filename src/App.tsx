@@ -18,6 +18,25 @@ import { DialogHost, askConfirm, askText } from "./components/Dialogs";
 import { desktop } from "./lib/desktop";
 import type { PanelId } from "./panels";
 
+const TOOL_NAMES: Partial<Record<Tool, string>> = {
+  highlight: "Resaltar: selecciona el texto",
+  underline: "Subrayar: selecciona el texto",
+  strike: "Tachar: selecciona el texto",
+  ink: "Lápiz: dibuja sobre la página",
+  rect: "Rectángulo: arrastra sobre la página",
+  ellipse: "Elipse: arrastra sobre la página",
+  line: "Línea: arrastra sobre la página",
+  arrow: "Flecha: arrastra sobre la página",
+  text: "Texto: haz clic o arrastra donde quieras escribir",
+  note: "Nota: haz clic donde quieras dejarla",
+  place: "Haz clic donde quieras colocarlo",
+  edit: "Editar texto: haz clic sobre el texto a cambiar",
+  redact: "Redacción: arrastra sobre la zona a eliminar",
+  "field-text": "Campo de texto: arrastra o haz clic",
+  "field-multiline": "Campo multilínea: arrastra o haz clic",
+  "field-check": "Casilla: haz clic donde colocarla",
+  hand: "Mano: arrastra para desplazarte",
+};
 const ZOOMS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
 const baseName = (n: string) => n.replace(/\.pdf$/i, "");
 type Tab = "inicio" | "comentar" | "editar" | "formularios" | "proteger" | "convertir";
@@ -109,22 +128,50 @@ export default function App() {
     setFuture((f) => f.slice(1));
   };
 
+  const runId = useRef(0);
+  const [slow, setSlow] = useState(false);
   const run = async (label: string, fn: () => Promise<void>) => {
+    const id = ++runId.current;
     setBusy(label);
+    setSlow(false);
     setError(null);
+    const slowTimer = setTimeout(() => runId.current === id && setSlow(true), 15000);
     try {
       await fn();
     } catch (e) {
       console.error(e);
-      setError(e instanceof Error ? e.message : typeof e === "string" ? e : JSON.stringify(e));
+      if (runId.current === id) setError(e instanceof Error ? e.message : typeof e === "string" ? e : JSON.stringify(e));
     } finally {
-      setBusy(null);
+      clearTimeout(slowTimer);
+      if (runId.current === id) (setBusy(null), setSlow(false));
     }
+  };
+  /** Deja de esperar una tarea que tarda demasiado (la interfaz vuelve a estar disponible). */
+  const cancelRun = () => {
+    runId.current++;
+    setBusy(null);
+    setSlow(false);
+    setInfo("Tarea cancelada");
   };
   const notify = (m: string) => {
     setInfo(m);
-    setTimeout(() => setInfo((x) => (x === m ? null : x)), 3500);
+    setTimeout(() => setInfo((x) => (x === m ? null : x)), 4000);
   };
+  // Cualquier error inesperado se muestra en pantalla (nunca falla en silencio).
+  useEffect(() => {
+    const msg = (r: unknown) => (r instanceof Error ? r.message : typeof r === "string" ? r : "Error inesperado");
+    const onRej = (e: PromiseRejectionEvent) => setError("Error inesperado: " + msg(e.reason));
+    const onErr = (e: ErrorEvent) => setError("Error inesperado: " + (e.message || "desconocido"));
+    window.addEventListener("unhandledrejection", onRej);
+    window.addEventListener("error", onErr);
+    return () => (window.removeEventListener("unhandledrejection", onRej), window.removeEventListener("error", onErr));
+  }, []);
+  // Los errores también desaparecen solos (antes se quedaban fijos).
+  useEffect(() => {
+    if (!error) return;
+    const t = setTimeout(() => setError(null), 9000);
+    return () => clearTimeout(t);
+  }, [error]);
 
   /** Abre/añade documentos ya cargados. */
   const addSources = useCallback(
@@ -182,19 +229,35 @@ export default function App() {
   });
 
   /** Bytes del documento actual tal como se guardaría. */
+  // Caché: si el documento no ha cambiado no se vuelve a generar (puede tardar en PDF grandes).
+  const bytesCache = useRef<{ doc: DocState; flatten: boolean; bytes: Promise<Uint8Array> } | null>(null);
   const currentBytes = useCallback(
     async (extra: Partial<BuildOptions> = {}) => {
-      const { applyRedactions } = await import("./lib/redact");
-      const hasRedact = Object.values(doc.annots).some((l) => l.some((a) => a.type === "redact"));
-      return buildPdf(pages, sources, {
-        annots: doc.annots,
-        forms: doc.forms,
-        flattenAnnots: flattenOnSave,
-        post: hasRedact ? (d, ps) => applyRedactions(d, ps, doc.annots, sources) : undefined,
-        ...extra,
-      });
+      const cacheable = !Object.keys(extra).length;
+      const c = bytesCache.current;
+      if (cacheable && c && c.doc === doc && c.flatten === flattenOnSave) return (await c.bytes).slice();
+      // Documento recién abierto y sin cambios: sus bytes originales (instantáneo).
+      const untouched = pristine && doc.pages === pristine && !Object.values(doc.annots).some((l) => l.length) && !Object.keys(doc.forms).length && !flattenOnSave;
+      const first = pages[0];
+      const job = (async () => {
+        if (cacheable && untouched && first?.kind === "src") return sources.get(first.srcId)!.bytes;
+        const { applyRedactions } = await import("./lib/redact");
+        const hasRedact = Object.values(doc.annots).some((l) => l.some((a) => a.type === "redact"));
+        return buildPdf(pages, sources, {
+          annots: doc.annots,
+          forms: doc.forms,
+          flattenAnnots: flattenOnSave,
+          post: hasRedact ? (d, ps) => applyRedactions(d, ps, doc.annots, sources) : undefined,
+          ...extra,
+        });
+      })();
+      if (cacheable) {
+        bytesCache.current = { doc, flatten: flattenOnSave, bytes: job };
+        job.catch(() => (bytesCache.current = null));
+      }
+      return (await job).slice();
     },
-    [doc, pages, sources, flattenOnSave],
+    [doc, pages, sources, flattenOnSave, pristine],
   );
 
   /** Sustituye el documento por una nueva versión (manteniendo deshacer). */
@@ -222,8 +285,10 @@ export default function App() {
     run("Guardando…", async () => {
       const hasRedact = Object.values(doc.annots).some((l) => l.some((a) => a.type === "redact"));
       if (hasRedact && !(await askConfirm("Aplicar redacciones", "Se aplicarán las redacciones: el contenido marcado se eliminará de forma permanente en el archivo guardado. ¿Continuar?", true))) return;
-      download(await currentBytes(), fileName);
-      setDirty(false);
+      if (await download(await currentBytes(), fileName)) {
+        setDirty(false);
+        if (desktop.available) notify("Guardado");
+      }
     });
 
   const selectedPages = useMemo(() => pages.filter((p) => selected.has(p.key)), [pages, selected]);
@@ -259,7 +324,7 @@ export default function App() {
   const extract = () =>
     run("Extrayendo…", async () => {
       const list = selectedPages.length ? selectedPages : [pages[current]];
-      download(await buildPdf(list, sources, buildOpts()), `${baseName(fileName)}_extracto.pdf`);
+      await download(await buildPdf(list, sources, buildOpts()), `${baseName(fileName)}_extracto.pdf`);
     });
   const split = () =>
     run("Dividiendo…", async () => {
@@ -267,7 +332,7 @@ export default function App() {
       for (let i = 0; i < pages.length; i++) {
         files[`${baseName(fileName)}_p${String(i + 1).padStart(3, "0")}.pdf`] = await buildPdf([pages[i]], sources, buildOpts());
       }
-      download(zipSync(files, { level: 0 }), `${baseName(fileName)}_paginas.zip`, "application/zip");
+      await download(zipSync(files, { level: 0 }), `${baseName(fileName)}_paginas.zip`, "application/zip");
     });
 
   const goTo = useCallback((i: number) => {
@@ -350,7 +415,8 @@ export default function App() {
     commit((d) => ({ ...d, annots: { ...d.annots, [pageKey]: [...(d.annots[pageKey] ?? []), a] } }));
     setSelAnnot({ page: pageKey, id: a.id });
     if (edit) setEditingId(a.id);
-    if (a.type === "text" || a.type === "note" || a.type.startsWith("field")) setTool("select");
+    // Las herramientas de un solo uso vuelven a "Seleccionar"; el lápiz y los marcadores siguen activos.
+    if (!["ink", "highlight", "underline", "strike"].includes(a.type)) setTool("select");
   };
   const updateAnnot = (pageKey: string, a: Annot) =>
     commit((d) => {
@@ -551,6 +617,7 @@ export default function App() {
     currentBytes,
     pristineBytes,
     goTo,
+    progress: (m: string) => setBusy(m),
     run,
     notify,
     close: () => setPanel(null),
@@ -634,6 +701,7 @@ export default function App() {
         {tab === "comentar" && (
           <>
             <div className="rgroup">
+              {T("select", "Seleccionar", "cursor", "Seleccionar y mover comentarios (Esc)")}
               {T("highlight", "Resaltar", "highlight", "Selecciona texto para resaltarlo")}
               {T("underline", "Subrayar", "underline")}
               {T("strike", "Tachar", "strike")}
@@ -666,6 +734,7 @@ export default function App() {
         {tab === "editar" && (
           <>
             <div className="rgroup">
+              {T("select", "Seleccionar", "cursor", "Seleccionar y mover (Esc)")}
               {T("edit", "Editar texto", "edittext", "Haz clic sobre un texto del documento para modificarlo")}
               {T("text", "Añadir texto", "text")}
               {B("Imagen", "image", () => imgInput.current?.click(), "Añadir imagen")}
@@ -703,6 +772,7 @@ export default function App() {
         {tab === "proteger" && (
           <>
             <div className="rgroup">
+              {T("select", "Seleccionar", "cursor", "Seleccionar (Esc)")}
               {P("sign", "Firmar con certificado", "cert", "Firma digital con certificado (.p12/.pfx, DNIe, tarjeta)")}
               {P("verify", "Verificar firmas", "verify", "Comprobar las firmas digitales del documento")}
               {B("Firma manuscrita", "sign", () => (setTab("comentar"), setShowSig(true)))}
@@ -756,9 +826,19 @@ export default function App() {
         }}
       />
 
-      {(error || busy || info) && (
-        <div className={`notice ${error ? "error" : ""}`} onClick={() => (setError(null), setInfo(null))}>
-          {error ?? busy ?? info}
+      {(error || info) && (
+        <div className={`notice ${error ? "error" : ""}`} role={error ? "alert" : "status"} onClick={() => (setError(null), setInfo(null))}>
+          {error ?? info}
+          {error && <span className="notice-close"> ✕</span>}
+        </div>
+      )}
+      {busy && !error && (
+        <div className="busy-overlay" role="status" aria-live="polite">
+          <div className="busy-box">
+            <div className="spinner" />
+            <span>{busy}</span>
+            {slow && <button onClick={cancelRun}>Cancelar</button>}
+          </div>
         </div>
       )}
 
@@ -793,6 +873,12 @@ export default function App() {
               </div>
             ))}
           </aside>
+          {TOOL_NAMES[tool] && (
+            <div className="tool-banner" role="status">
+              <span>{TOOL_NAMES[tool]}</span>
+              <button onClick={() => (setTool("select"), setPending(null))}>Terminar (Esc)</button>
+            </div>
+          )}
           <div
             className={`viewer tool-${tool}`}
             ref={viewer}

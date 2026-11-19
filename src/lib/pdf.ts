@@ -201,10 +201,14 @@ export async function buildPdf(pages: PageItem[], sources: Map<string, Source>, 
   return doc.save({ updateFieldAppearances: false });
 }
 
-export function download(bytes: Uint8Array, name: string, type = "application/pdf") {
+/** Guarda/descarga un archivo. En escritorio abre el diálogo nativo; devuelve false si se cancela. */
+export async function download(bytes: Uint8Array, name: string, type = "application/pdf"): Promise<boolean> {
   if (desktop.available) {
-    void desktop.saveFile(bytes, name);
-    return;
+    try {
+      return await desktop.saveFile(bytes, name);
+    } catch (e) {
+      throw new Error("No se pudo guardar el archivo: " + (e instanceof Error ? e.message : String(e)));
+    }
   }
   const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type }));
   const a = document.createElement("a");
@@ -212,6 +216,7 @@ export function download(bytes: Uint8Array, name: string, type = "application/pd
   a.download = name;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  return true;
 }
 
 /** Texto plano de cada página, para la búsqueda. */

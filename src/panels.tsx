@@ -27,6 +27,8 @@ export interface PanelCtx {
   /** Bytes para firmar/verificar: el original si no se ha modificado (conserva firmas previas). */
   pristineBytes: () => Promise<{ bytes: Uint8Array; pristine: boolean }>;
   run: (label: string, fn: () => Promise<void>) => Promise<void>;
+  /** Actualiza el mensaje de progreso de la tarea en curso. */
+  progress: (msg: string) => void;
   notify: (m: string) => void;
   close: () => void;
   setError: (e: string | null) => void;
@@ -37,6 +39,11 @@ export interface PanelCtx {
 const base = (n: string) => n.replace(/\.pdf$/i, "");
 const fmtSize = (n: number) => (n > 1048576 ? `${(n / 1048576).toFixed(2)} MB` : `${Math.round(n / 1024)} KB`);
 const fileBytes = async (f: File) => new Uint8Array(await f.arrayBuffer());
+/** Guardar desde un botón (fuera de una tarea): muestra errores y progreso. */
+const saveAs = (ctx: PanelCtx, bytes: Uint8Array, name: string, type?: string) =>
+  void ctx.run("Guardando…", async () => {
+    await download(bytes, name, type);
+  });
 
 export function Panels({ id, ctx }: { id: PanelId; ctx: PanelCtx }) {
   const C = PANELS[id];
@@ -384,7 +391,7 @@ function AttachmentsPanel({ ctx }: P) {
           {list.map((a, i) => (
             <li key={i} className="row between">
               <span>{a.name} <span className="muted small">({fmtSize(a.size)})</span></span>
-              <button className="link" onClick={() => download(a.bytes, a.name, "application/octet-stream")}>Descargar</button>
+              <button className="link" onClick={() => saveAs(ctx, a.bytes, a.name, "application/octet-stream")}>Descargar</button>
             </li>
           ))}
         </ul>
@@ -461,11 +468,11 @@ function FormDataPanel({ ctx }: P) {
       );
     })().catch((e) => ctx.setError(String(e)));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  const exportJson = () => download(new TextEncoder().encode(JSON.stringify(Object.fromEntries(fields!.map((f) => [f.name, f.value])), null, 2)), `${base(ctx.fileName)}_datos.json`, "application/json");
+  const exportJson = () => saveAs(ctx, new TextEncoder().encode(JSON.stringify(Object.fromEntries(fields!.map((f) => [f.name, f.value])), null, 2)), `${base(ctx.fileName)}_datos.json`, "application/json");
   const exportCsv = () => {
     const esc = (s: string) => `"${s.replace(/"/g, '""')}"`;
     const csv = fields!.map((f) => esc(f.name)).join(";") + "\n" + fields!.map((f) => esc(String(f.value))).join(";");
-    download(new TextEncoder().encode("﻿" + csv), `${base(ctx.fileName)}_datos.csv`, "text/csv");
+    saveAs(ctx, new TextEncoder().encode("﻿" + csv), `${base(ctx.fileName)}_datos.csv`, "text/csv");
   };
   const importJson = async (f: File) => {
     const data = JSON.parse(await f.text()) as Record<string, string | boolean>;
@@ -586,7 +593,7 @@ function SignPanel({ ctx }: P) {
         certify: certify || undefined,
       });
       const name = `${base(ctx.fileName)}_firmado.pdf`;
-      download(out, name);
+      await download(out, name);
       await ctx.replaceDoc(out);
       ctx.notify("Documento firmado y descargado");
       ctx.close();
@@ -759,7 +766,7 @@ function EncryptPanel({ ctx }: P) {
       if (!user && !owner) throw new Error("Escribe al menos una contraseña");
       const { encryptPdf } = await import("./lib/qpdf");
       const out = await encryptPdf(await ctx.currentBytes(), user, owner, perms);
-      download(out, `${base(ctx.fileName)}_protegido.pdf`);
+      await download(out, `${base(ctx.fileName)}_protegido.pdf`);
       ctx.notify("PDF protegido descargado");
       ctx.close();
     });
@@ -786,7 +793,7 @@ function EncryptPanel({ ctx }: P) {
 function DecryptPanel({ ctx }: P) {
   const go = () =>
     ctx.run("Guardando…", async () => {
-      download(await ctx.currentBytes(), `${base(ctx.fileName)}_sin_proteccion.pdf`);
+      await download(await ctx.currentBytes(), `${base(ctx.fileName)}_sin_proteccion.pdf`);
       ctx.close();
     });
   return (
@@ -875,7 +882,7 @@ function ToImagesPanel({ ctx }: P) {
     ctx.run("Convirtiendo…", async () => {
       const { pdfToImages } = await import("./lib/convert");
       const r = await pdfToImages(await ctx.currentBytes(), base(ctx.fileName), format, dpi);
-      download(r.bytes, r.name, r.type);
+      await download(r.bytes, r.name, r.type);
       ctx.close();
     });
   return (
@@ -894,7 +901,7 @@ function ToWordPanel({ ctx }: P) {
   const go = () =>
     ctx.run("Convirtiendo a Word…", async () => {
       const { pdfToDocx } = await import("./lib/convert");
-      download(await pdfToDocx(await ctx.currentBytes(), snap), `${base(ctx.fileName)}.docx`, "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+      await download(await pdfToDocx(await ctx.currentBytes(), snap), `${base(ctx.fileName)}.docx`, "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
       ctx.close();
     });
   return (
@@ -920,7 +927,7 @@ function ToTextPanel({ ctx }: P) {
       {text === null ? <p className="muted">Extrayendo…</p> : <textarea className="bigtext" readOnly value={text} />}
       <div className="row end">
         <button onClick={() => text && navigator.clipboard.writeText(text).then(() => ctx.notify("Copiado"))} disabled={!text}>Copiar</button>
-        <button className="primary" onClick={() => text !== null && download(new TextEncoder().encode(text), `${base(ctx.fileName)}.txt`, "text/plain")} disabled={text === null}>Descargar .txt</button>
+        <button className="primary" onClick={() => text !== null && saveAs(ctx, new TextEncoder().encode(text), `${base(ctx.fileName)}.txt`, "text/plain")} disabled={text === null}>Descargar .txt</button>
       </div>
     </Modal>
   );
@@ -931,7 +938,7 @@ function ToHtmlPanel({ ctx }: P) {
   const go = () =>
     ctx.run("Convirtiendo a HTML…", async () => {
       const { pdfToHtml } = await import("./lib/convert");
-      download(new TextEncoder().encode(await pdfToHtml(await ctx.currentBytes(), base(ctx.fileName), img)), `${base(ctx.fileName)}.html`, "text/html");
+      await download(new TextEncoder().encode(await pdfToHtml(await ctx.currentBytes(), base(ctx.fileName), img)), `${base(ctx.fileName)}.html`, "text/html");
       ctx.close();
     });
   return (
@@ -988,7 +995,7 @@ function OcrPanel({ ctx }: P) {
   const go = () =>
     ctx.run("OCR en curso…", async () => {
       const { ocrPdf } = await import("./lib/ocr");
-      const r = await ocrPdf(await ctx.currentBytes(), { langs, dpi, onlyWithoutText: only, onProgress: (msg, pct) => setProgress({ msg, pct }) });
+      const r = await ocrPdf(await ctx.currentBytes(), { langs, dpi, onlyWithoutText: only, onProgress: (msg, pct) => (setProgress({ msg, pct }), ctx.progress(`${msg} ${Math.round(pct)}%`)) });
       if (!r.pages) {
         ctx.notify("Todas las páginas ya tenían texto: no hacía falta OCR");
         ctx.close();
@@ -1038,7 +1045,7 @@ function CompressPanel({ ctx }: P) {
         {!result ? <button className="primary" onClick={go}>Comprimir</button> : (
           <>
             <button onClick={() => ctx.run("Aplicando…", async () => { await ctx.replaceDoc(result.bytes); ctx.close(); })}>Usar en el editor</button>
-            <button className="primary" onClick={() => download(result.bytes, `${base(ctx.fileName)}_comprimido.pdf`)}>Descargar</button>
+            <button className="primary" onClick={() => saveAs(ctx, result.bytes, `${base(ctx.fileName)}_comprimido.pdf`)}>Descargar</button>
           </>
         )}
       </div>
