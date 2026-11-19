@@ -49,7 +49,12 @@ const save = async (p, out) => {
   await p.click(".modal button.primary");
   await p.waitForTimeout(400);
   await p.screenshot({ path: S + "/d1.png" });
-  await save(p, S + "/edited-redacted.pdf");
+  {
+    const wait = p.waitForEvent("download");
+    await p.keyboard.press("Control+s");
+    await p.click(".modal:has-text('Aplicar redacciones') button.primary");
+    await (await wait).saveAs(S + "/edited-redacted.pdf");
+  }
 
   // --- Firma digital con certificado .p12
   await open(p, S + "/prueba.pdf");
@@ -71,6 +76,7 @@ const save = async (p, out) => {
   await p.waitForSelector(".sig-report");
   console.log("verificación:", (await p.locator(".sig-report .badge").textContent()), "|", (await p.locator(".sig-report li").first().textContent()));
   await p.click(".sig-report button.link:has-text('Confiar')");
+  await p.click(".modal:has-text('Confiar en el emisor') button.primary");
   await p.waitForTimeout(800);
   console.log("tras confiar:", (await p.locator(".sig-report .badge").textContent()));
   await p.screenshot({ path: S + "/d3.png" });
@@ -82,7 +88,12 @@ const save = async (p, out) => {
   await p.fill(".modal input[type=password] >> nth=1", "owner");
   const [edl] = await Promise.all([p.waitForEvent("download"), p.click(".modal button.primary")]);
   await edl.saveAs(S + "/ui-encrypted.pdf");
-  await open(p, S + "/ui-encrypted.pdf");
+  await p.setInputFiles("input[type=file] >> nth=0", S + "/ui-encrypted.pdf");
+  await p.waitForSelector(".modal:has-text('Documento protegido') input[type=password]");
+  await p.fill(".modal input[type=password]", "user");
+  await p.click(".modal button.primary");
+  await p.waitForSelector(".page .page-canvas canvas");
+  await p.waitForTimeout(900);
   console.log("cifrado reabierto, páginas:", await p.locator(".thumb").count());
   console.log("errores:", errs);
   await b.close();

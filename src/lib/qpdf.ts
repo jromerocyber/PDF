@@ -11,19 +11,24 @@ export interface QpdfResult {
 /** Ejecuta qpdf: `qpdf /in.pdf ...args /out.pdf`. Cada llamada usa una instancia nueva. */
 export async function qpdf(input: Uint8Array, args: string[], withOutput = true): Promise<QpdfResult> {
   const log: string[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const m: any = await createModule({
     locateFile: () => wasmUrl,
     noInitialRun: true,
     print: (t: string) => log.push(t),
     printErr: (t: string) => log.push(t),
   } as never);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   m.FS.writeFile("/in.pdf", input);
   let code = 0;
+  // qpdf escribe sus avisos por console.error: los recogemos en el registro en lugar de mostrarlos.
+  const origError = console.error;
+  console.error = (...a: unknown[]) => log.push(a.join(" "));
   try {
     code = m.callMain(["/in.pdf", ...args, ...(withOutput ? ["/out.pdf"] : [])]);
   } catch (e) {
     code = (e as { status?: number }).status ?? 1;
+  } finally {
+    console.error = origError;
   }
   let output: Uint8Array | null = null;
   if (withOutput) {

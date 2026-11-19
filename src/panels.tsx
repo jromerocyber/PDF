@@ -6,6 +6,7 @@ import type { Annot, DocState } from "./lib/model";
 import { uid } from "./lib/pdf";
 import { loadSaved } from "./components/SignaturePad";
 import { desktop } from "./lib/desktop";
+import { askConfirm } from "./components/Dialogs";
 
 export type PanelId =
   | "print" | "crop" | "properties" | "outline" | "watermark" | "headerfooter" | "bates" | "background" | "attachments" | "compare"
@@ -507,7 +508,7 @@ const TSAS = [
 ];
 
 function SignPanel({ ctx }: P) {
-  const [mode, setMode] = useState<"file" | "system">("file");
+  const [mode, setMode] = useState<"file" | "system">(desktop.available ? "system" : "file");
   const [file, setFile] = useState<File | null>(null);
   const [pw, setPw] = useState("");
   const [sysCerts, setSysCerts] = useState<import("./lib/desktop").SystemCert[] | null>(null);
@@ -555,7 +556,7 @@ function SignPanel({ ctx }: P) {
       const { hasSignatures } = await import("./lib/sign/verify");
       const { bytes, pristine } = await ctx.pristineBytes();
       const anySrcSigned = [...ctx.sources.values()].some((s) => hasSignatures(s.bytes));
-      if (!pristine && anySrcSigned && !window.confirm("El documento tiene firmas previas y lo has modificado: esas firmas dejarán de ser válidas. ¿Firmar igualmente?")) return;
+      if (!pristine && anySrcSigned && !(await askConfirm("Firmas previas", "El documento tiene firmas previas y lo has modificado: esas firmas dejarán de ser válidas. ¿Firmar igualmente?", true))) return;
       let rect: [number, number, number, number] | undefined;
       const pIdx = Math.min(Math.max(1, page), ctx.pages.length) - 1;
       if (visible) {
@@ -708,7 +709,7 @@ function VerifyPanel({ ctx }: P) {
     const root = certs.find((c) => certInfo(c).selfSigned) ?? certs[certs.length - 1];
     if (!root) return;
     const ci = certInfo(root);
-    if (!window.confirm(`¿Confiar en "${ci.subjectCN}" como autoridad de certificación?\nSolo hazlo si sabes que es legítima (p. ej. FNMT, DNIe, tu empresa).`)) return;
+    if (!(await askConfirm("Confiar en el emisor", `¿Confiar en "${ci.subjectCN}" como autoridad de certificación?\nSolo hazlo si sabes que es legítima (p. ej. FNMT, DNIe, tu empresa).`))) return;
     addTrustedRoot(b64(root));
     setTick((t) => t + 1);
   };

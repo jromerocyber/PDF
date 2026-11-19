@@ -58,9 +58,12 @@ export async function requestTimestamp(tsaUrl: string, data: Uint8Array): Promis
   try {
     resBytes = await httpPost(tsaUrl, new Uint8Array(req.toSchema().toBER()), "application/timestamp-query");
   } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e);
+    const browser = httpPost === browserPost;
     throw new Error(
       `No se pudo contactar con el servidor de sellado de tiempo (${tsaUrl}). ` +
-        `En el navegador muchos servidores lo bloquean; usa la app de escritorio o firma sin sello de tiempo. Detalle: ${(e as Error).message}`,
+        (browser ? "En el navegador muchos servidores lo bloquean; usa la app de escritorio o firma sin sello de tiempo. " : "Comprueba la conexión a Internet o elige otro servidor. ") +
+        `Detalle: ${detail}`,
     );
   }
   const res = pkijs.TimeStampResp.fromBER(buf(resBytes));

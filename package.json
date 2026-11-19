@@ -27,6 +27,7 @@
     "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.12.6",
     "@tesseract.js-data/eng": "^1.0.0",
     "@tesseract.js-data/spa": "^1.0.0",
     "@types/node": "^24.19.2",

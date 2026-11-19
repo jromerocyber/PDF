@@ -14,6 +14,7 @@ import type { Annot, DocState, Rect } from "./lib/model";
 import { emptyState } from "./lib/model";
 import { STAMPS, imageFromFile, makeStamp } from "./lib/stamps";
 import { Panels } from "./panels";
+import { DialogHost, askConfirm, askText } from "./components/Dialogs";
 import { desktop } from "./lib/desktop";
 import type { PanelId } from "./panels";
 
@@ -115,7 +116,7 @@ export default function App() {
       await fn();
     } catch (e) {
       console.error(e);
-      setError(e instanceof Error ? e.message : String(e));
+      setError(e instanceof Error ? e.message : typeof e === "string" ? e : JSON.stringify(e));
     } finally {
       setBusy(null);
     }
@@ -154,7 +155,7 @@ export default function App() {
   );
 
   const askPassword = useCallback((name: string, retry: boolean) => {
-    return window.prompt(`${retry ? "Contraseña incorrecta. " : ""}"${name}" está protegido. Introduce la contraseña:`);
+    return askText("Documento protegido", `${retry ? "Contraseña incorrecta. " : ""}"${name}" está protegido. Introduce la contraseña:`, true);
   }, []);
 
   const openFiles = (files: FileList | File[], append: boolean) =>
@@ -220,7 +221,7 @@ export default function App() {
   const save = () =>
     run("Guardando…", async () => {
       const hasRedact = Object.values(doc.annots).some((l) => l.some((a) => a.type === "redact"));
-      if (hasRedact && !window.confirm("Se aplicarán las redacciones: el contenido marcado se eliminará de forma permanente en el archivo guardado. ¿Continuar?")) return;
+      if (hasRedact && !(await askConfirm("Aplicar redacciones", "Se aplicarán las redacciones: el contenido marcado se eliminará de forma permanente en el archivo guardado. ¿Continuar?", true))) return;
       download(await currentBytes(), fileName);
       setDirty(false);
     });
@@ -887,6 +888,7 @@ export default function App() {
         />
       )}
       {panel && <Panels id={panel} ctx={panelCtx} />}
+      <DialogHost />
     </div>
   );
 }
