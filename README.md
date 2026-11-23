@@ -42,7 +42,7 @@ npm run build          # web en dist/
 npx tauri build        # instalador para el sistema actual
 ```
 
-Compilar los instaladores de todas las plataformas: sube el código a GitHub y crea una etiqueta (`git tag v1.0.0 && git push --tags`) o lanza el flujo **Instaladores** desde la pestaña Actions. El flujo **Web** publica la versión web en GitHub Pages.
+Compilar los instaladores de todas las plataformas: sube el código a GitHub y crea una etiqueta (`git tag v1.0.0 && git push --tags`) o lanza el flujo **Instaladores** desde la pestaña Actions. El flujo **Web** comprueba en cada cambio que la app compila; para publicar la versión web en GitHub Pages, activa Pages (Settings → Pages → Source: «GitHub Actions») y lánzalo a mano desde Actions.
 
 Pruebas automáticas en navegador (con `npx vite preview --port 4173` en marcha): `node tests/e2e-annots.cjs <carpeta>`, `tests/e2e-docs.cjs`, `tests/e2e-convert.cjs` (los archivos de prueba se generan con `tests/make-sample.mjs` y `tests/fixtures.mts`).
 
