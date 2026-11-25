@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import type { PageViewport } from "pdfjs-dist";
 import type { Source } from "../lib/pdf";
 
@@ -45,9 +45,13 @@ interface Props {
   index: number;
   values: Record<string, string | boolean>;
   onChange: (key: string, value: string | boolean) => void;
+  /** Permitir editar los campos de solo lectura. */
+  unlock?: boolean;
+  /** Se ha pulsado un campo bloqueado. */
+  onLocked?: (fieldName: string) => void;
 }
 
-export function FormLayer({ viewport, source, index, values, onChange }: Props) {
+export function FormLayer({ viewport, source, index, values, onChange, unlock, onLocked }: Props) {
   const [widgets, setWidgets] = useState<Widget[]>([]);
   useEffect(() => {
     let alive = true;
@@ -73,6 +77,10 @@ export function FormLayer({ viewport, source, index, values, onChange }: Props) 
           fontSize: Math.max(8, Math.min(Math.abs(by - ay) * 0.7, 12 * s)),
         };
         const stored = values[key];
+        const locked = w.readOnly && !unlock && w.fieldType !== "Sig";
+        const lockCover = locked ? (
+          <div key={w.id + "-lock"} className="fl-locked" style={style} title={`${w.fieldName} (solo lectura)`} onClick={() => onLocked?.(w.fieldName)} />
+        ) : null;
         if (w.fieldType === "Sig") {
           return <div key={w.id} className="fl-sig" style={style} title="Campo de firma: usa la herramienta Firmar">Firma</div>;
         }
@@ -82,35 +90,39 @@ export function FormLayer({ viewport, source, index, values, onChange }: Props) 
             className: "fl-input",
             style: { ...style, textAlign: (["left", "center", "right"] as const)[w.textAlignment ?? 0] },
             value,
-            disabled: w.readOnly,
+            disabled: w.readOnly && !unlock,
             maxLength: w.maxLen || undefined,
             title: w.fieldName,
             onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => onChange(key, e.target.value),
-            onKeyDown: (e: React.KeyboardEvent) => e.stopPropagation(),
           };
-          return w.multiLine ? <textarea key={w.id} {...props} /> : <input key={w.id} type={w.password ? "password" : "text"} {...props} />;
+          return (
+            <Fragment key={w.id}>
+              {w.multiLine ? <textarea {...props} /> : <input type={w.password ? "password" : "text"} {...props} />}
+              {lockCover}
+            </Fragment>
+          );
         }
         if (w.fieldType === "Btn" && w.checkBox) {
           const checked = stored !== undefined ? !!stored : !!w.fieldValue && w.fieldValue !== "Off";
-          return <input key={w.id} type="checkbox" className="fl-check" style={style} checked={checked} disabled={w.readOnly} title={w.fieldName} onChange={(e) => onChange(key, e.target.checked)} />;
+          return <Fragment key={w.id}><input type="checkbox" className="fl-check" style={style} checked={checked} disabled={w.readOnly && !unlock} title={w.fieldName} onChange={(e) => onChange(key, e.target.checked)} />{lockCover}</Fragment>;
         }
         if (w.fieldType === "Btn" && w.radioButton) {
           const current = stored !== undefined ? String(stored) : String(w.fieldValue ?? "");
           return (
-            <input key={w.id} type="radio" className="fl-check" style={style} name={key} checked={current === w.buttonValue} disabled={w.readOnly} title={w.fieldName} onChange={() => onChange(key, w.buttonValue ?? "")} />
+            <Fragment key={w.id}><input type="radio" className="fl-check" style={style} name={key} checked={current === w.buttonValue} disabled={w.readOnly && !unlock} title={w.fieldName} onChange={() => onChange(key, w.buttonValue ?? "")} />{lockCover}</Fragment>
           );
         }
         if (w.fieldType === "Ch") {
           const current = stored !== undefined ? String(stored) : Array.isArray(w.fieldValue) ? (w.fieldValue[0] ?? "") : (w.fieldValue ?? "");
           return (
-            <select key={w.id} className="fl-input" style={style} value={current} disabled={w.readOnly} title={w.fieldName} onChange={(e) => onChange(key, e.target.value)}>
+            <Fragment key={w.id}><select className="fl-input" style={style} value={current} disabled={w.readOnly && !unlock} title={w.fieldName} onChange={(e) => onChange(key, e.target.value)}>
               {!w.options?.some((o) => o.exportValue === current) && <option value={current}>{current}</option>}
               {w.options?.map((o) => (
                 <option key={o.exportValue} value={o.displayValue}>
                   {o.displayValue}
                 </option>
               ))}
-            </select>
+            </select>{lockCover}</Fragment>
           );
         }
         return null;

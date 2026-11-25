@@ -86,16 +86,27 @@ export interface BuildOptions {
   forms?: Record<string, string | boolean>;
   flattenAnnots?: boolean;
   flattenForms?: boolean;
+  /** Quitar la marca de solo lectura de los campos de formulario. */
+  unlockForms?: boolean;
   /** Hook para procesar el documento final antes de guardar (redacción, marcas de agua...). */
   post?: (doc: PDFDocument, pages: PageItem[]) => Promise<void>;
 }
 
 /** Aplica los valores de formulario de un origen a su documento pdf-lib. */
-function applyFormValues(doc: PDFDocument, srcId: string, forms: Record<string, string | boolean>) {
+function applyFormValues(doc: PDFDocument, srcId: string, forms: Record<string, string | boolean>, unlock = false) {
   const prefix = srcId + "|";
   const entries = Object.entries(forms).filter(([k]) => k.startsWith(prefix));
-  if (!entries.length) return;
+  if (!entries.length && !unlock) return;
   const form = doc.getForm();
+  if (unlock) {
+    for (const f of form.getFields()) {
+      try {
+        if (f.isReadOnly()) f.disableReadOnly();
+      } catch {
+        /* campo raro: se deja como está */
+      }
+    }
+  }
   for (const [k, v] of entries) {
     const field = form.getFieldMaybe(k.slice(prefix.length));
     if (!field) continue;
@@ -125,7 +136,7 @@ export async function buildDoc(pages: PageItem[], sources: Map<string, Source>, 
       const s = sources.get(id);
       if (!s) throw new Error("Documento origen no encontrado");
       d = await PDFDocument.load(s.bytes, { ignoreEncryption: true, updateMetadata: false });
-      if (opts.forms) applyFormValues(d, id, opts.forms);
+      if (opts.forms || opts.unlockForms) applyFormValues(d, id, opts.forms ?? {}, !!opts.unlockForms);
       loaded.set(id, d);
     }
     return d;

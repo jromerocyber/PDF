@@ -44,6 +44,8 @@ export interface DocState {
   annots: Record<string, Annot[]>;
   /** Valores de campos de formulario existentes, por `${srcId}|${nombreCampo}`. */
   forms: Record<string, string | boolean>;
+  /** Campos de solo lectura desbloqueados para editarlos (se guardan ya editables). */
+  unlockForms?: boolean;
 }
 
 export const emptyState = (): DocState => ({ pages: [], annots: {}, forms: {} });

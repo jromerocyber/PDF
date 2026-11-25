@@ -302,7 +302,6 @@ export function Overlay(p: Props) {
                       p.onEdit(null);
                     }}
                     onKeyDown={(e) => {
-                      e.stopPropagation();
                       if (e.key === "Escape") (e.target as HTMLTextAreaElement).blur();
                     }}
                   />
@@ -420,7 +419,7 @@ function NotePopup({ note, pos, onSave }: { note: Extract<Annot, { type: "note" 
   return (
     <div className="note-popup" style={{ left: pos[0] + 24, top: pos[1] }} onPointerDown={(e) => e.stopPropagation()}>
       <div className="note-head">{note.author || "Nota"}</div>
-      <textarea ref={ref} defaultValue={note.text} onKeyDown={(e) => e.stopPropagation()} placeholder="Escribe tu comentario…" />
+      <textarea ref={ref} defaultValue={note.text} onBlur={(e) => onSave(e.target.value)} placeholder="Escribe tu comentario…" />
       <button className="primary" onClick={() => onSave(ref.current?.value ?? "")}>Guardar</button>
     </div>
   );

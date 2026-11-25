@@ -279,3 +279,7 @@ ul.plain { list-style: none; padding: 0; margin: 0; display: flex; flex-directio
 .tool-banner button { background: #fff; color: #1e3a8a; border-radius: 99px; padding: 3px 12px; font-weight: 600; }
 .tool-banner button:hover:not(:disabled) { background: #dbeafe; border-color: transparent; }
 @media (max-width: 720px) { .tool-banner span { display: none; } }
+
+/* Campo de solo lectura: capa que avisa al pulsarlo */
+.fl-locked { position: absolute; pointer-events: all; cursor: not-allowed; background: repeating-linear-gradient(135deg, transparent 0 6px, rgb(100 116 139 / 0.12) 6px 8px); border: 1px dashed rgb(100 116 139 / 0.6); box-sizing: border-box; }
+.fl-input:disabled { background: rgba(226, 232, 240, 0.7); color: #333; }

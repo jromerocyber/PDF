@@ -224,6 +224,7 @@ export default function App() {
   const buildOpts = (extra: Partial<BuildOptions> = {}): BuildOptions => ({
     annots: doc.annots,
     forms: doc.forms,
+    unlockForms: doc.unlockForms,
     flattenAnnots: flattenOnSave,
     ...extra,
   });
@@ -237,7 +238,7 @@ export default function App() {
       const c = bytesCache.current;
       if (cacheable && c && c.doc === doc && c.flatten === flattenOnSave) return (await c.bytes).slice();
       // Documento recién abierto y sin cambios: sus bytes originales (instantáneo).
-      const untouched = pristine && doc.pages === pristine && !Object.values(doc.annots).some((l) => l.length) && !Object.keys(doc.forms).length && !flattenOnSave;
+      const untouched = pristine && doc.pages === pristine && !Object.values(doc.annots).some((l) => l.length) && !Object.keys(doc.forms).length && !doc.unlockForms && !flattenOnSave;
       const first = pages[0];
       const job = (async () => {
         if (cacheable && untouched && first?.kind === "src") return sources.get(first.srcId)!.bytes;
@@ -246,6 +247,7 @@ export default function App() {
         return buildPdf(pages, sources, {
           annots: doc.annots,
           forms: doc.forms,
+          unlockForms: doc.unlockForms,
           flattenAnnots: flattenOnSave,
           post: hasRedact ? (d, ps) => applyRedactions(d, ps, doc.annots, sources) : undefined,
           ...extra,
@@ -281,6 +283,7 @@ export default function App() {
     return { bytes: await currentBytes(), pristine: false };
   }, [pristine, doc, pages, sources, currentBytes]);
 
+  const saveRef = useRef<() => void>(() => {});
   const save = () =>
     run("Guardando…", async () => {
       const hasRedact = Object.values(doc.annots).some((l) => l.some((a) => a.type === "redact"));
@@ -290,6 +293,7 @@ export default function App() {
         if (desktop.available) notify("Guardado");
       }
     });
+  saveRef.current = save;
 
   const selectedPages = useMemo(() => pages.filter((p) => selected.has(p.key)), [pages, selected]);
   const targets = useCallback(() => (selected.size ? selected : new Set(pages[current] ? [pages[current].key] : [])), [selected, pages, current]);
@@ -558,7 +562,12 @@ export default function App() {
       const t = e.target as HTMLElement;
       const typing = t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT";
       if (mod && e.key === "o") (e.preventDefault(), openInput.current?.click());
-      else if (mod && e.key === "s" && pages.length) (e.preventDefault(), save());
+      else if (mod && e.key === "s" && pages.length) {
+        e.preventDefault();
+        // Confirmar primero lo que se esté escribiendo (campo o cuadro de texto) y guardar ya con ese cambio.
+        if (typing) (t as HTMLElement).blur();
+        setTimeout(() => saveRef.current(), typing ? 80 : 0);
+      }
       else if (mod && e.key === "p" && pages.length) (e.preventDefault(), setPanel("print"));
       else if (mod && e.key === "f" && pages.length) (e.preventDefault(), searchInput.current?.focus());
       else if (typing) return;
@@ -764,6 +773,19 @@ export default function App() {
               {T("field-check", "Casilla", "check", "Crear casilla de verificación")}
             </div>
             <div className="rgroup">
+              <button
+                className={`tbtn ${doc.unlockForms ? "on" : ""}`}
+                disabled={!has}
+                onClick={() => {
+                  const on = !doc.unlockForms;
+                  commit((d) => ({ ...d, unlockForms: on }));
+                  notify(on ? "Campos de solo lectura desbloqueados: ya puedes editarlos. Al guardar quedarán editables." : "Campos de solo lectura bloqueados de nuevo");
+                }}
+                title="Permite editar los campos marcados como de solo lectura"
+              >
+                <Icon name={doc.unlockForms ? "unlock" : "lock"} />
+                <span>{doc.unlockForms ? "Campos desbloqueados" : "Desbloquear campos"}</span>
+              </button>
               {P("formdata", "Datos", "table", "Exportar/importar datos del formulario")}
               {B("Borrar datos", "eraser", () => commit((d) => ({ ...d, forms: Object.fromEntries(Object.keys(d.forms).map((k) => [k, typeof d.forms[k] === "boolean" ? false : ""])) })), "Vaciar los valores introducidos")}
             </div>
@@ -903,7 +925,15 @@ export default function App() {
                       return (
                         <>
                           {src && p.kind === "src" && tool === "select" && (
-                            <FormLayer viewport={vp} source={src} index={p.index} values={doc.forms} onChange={(k, v) => commit((d) => ({ ...d, forms: { ...d.forms, [k]: v } }))} />
+                            <FormLayer
+                              viewport={vp}
+                              source={src}
+                              index={p.index}
+                              values={doc.forms}
+                              unlock={!!doc.unlockForms}
+                              onLocked={(name) => notify(`El campo "${name}" es de solo lectura. Para editarlo: pestaña Formularios → Desbloquear campos.`)}
+                              onChange={(k, v) => commit((d) => ({ ...d, forms: { ...d.forms, [k]: v } }))}
+                            />
                           )}
                           <Overlay
                             viewport={vp}
