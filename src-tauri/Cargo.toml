@@ -1,6 +1,6 @@
 [package]
 name = "pdf-studio"
-version = "1.0.2"
+version = "1.0.3"
 description = "PDF Studio: editor de PDF libre"
 edition = "2021"
 license = "MIT"

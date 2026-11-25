@@ -30,7 +30,7 @@ const TOOL_NAMES: Partial<Record<Tool, string>> = {
   text: "Texto: haz clic o arrastra donde quieras escribir",
   note: "Nota: haz clic donde quieras dejarla",
   place: "Haz clic donde quieras colocarlo",
-  edit: "Editar texto: haz clic sobre el texto a cambiar",
+  edit: "Editar texto: haz clic sobre el texto o el campo a cambiar",
   redact: "Redacción: arrastra sobre la zona a eliminar",
   "field-text": "Campo de texto: arrastra o haz clic",
   "field-multiline": "Campo multilínea: arrastra o haz clic",
@@ -490,28 +490,64 @@ export default function App() {
     sel.removeAllRanges();
   }, [tool, style, commit]);
 
-  /** Herramienta "Editar texto": al hacer clic en un texto, lo tapa y crea un cuadro editable encima. */
+  /** Color de fondo dominante del lienzo en una zona de la pantalla (el fondo ocupa más que las letras).
+   *  Sirve para que el texto editado tape el original con el mismo color de fondo. */
+  const canvasColorAt = (pageEl: HTMLElement, x1: number, y1: number, x2 = x1 + 1, y2 = y1 + 1): string => {
+    const cv = pageEl.querySelector<HTMLCanvasElement>(".page-canvas canvas");
+    if (!cv) return "#ffffff";
+    const r = cv.getBoundingClientRect();
+    const kx = cv.width / r.width, ky = cv.height / r.height;
+    const sx = Math.max(0, Math.floor((x1 - r.left) * kx)), sy = Math.max(0, Math.floor((y1 - r.top) * ky));
+    const w = Math.max(1, Math.min(cv.width - sx, Math.ceil((x2 - x1) * kx))), h = Math.max(1, Math.min(cv.height - sy, Math.ceil((y2 - y1) * ky)));
+    try {
+      const d = cv.getContext("2d", { willReadFrequently: true })!.getImageData(sx, sy, w, h).data;
+      const count = new Map<number, number>();
+      const step = Math.max(1, Math.floor((w * h) / 4000)) * 4;
+      for (let i = 0; i < d.length; i += step) {
+        const c = ((d[i] >> 3) << 10) | ((d[i + 1] >> 3) << 5) | (d[i + 2] >> 3); // agrupar tonos parecidos
+        count.set(c, (count.get(c) ?? 0) + 1);
+      }
+      let best = 0, bestN = -1;
+      for (const [c, n] of count) if (n > bestN) (best = c), (bestN = n);
+      const ch = (v: number) => Math.min(255, (v << 3) + 4).toString(16).padStart(2, "0");
+      return "#" + ch((best >> 10) & 31) + ch((best >> 5) & 31) + ch(best & 31);
+    } catch {
+      return "#ffffff";
+    }
+  };
+
+  /** Herramienta "Editar texto": al hacer clic en un texto, lo tapa (con su color de fondo) y crea un cuadro editable encima.
+   *  Si en ese punto no hay texto detectable (p. ej. un campo aplanado o dibujado), crea un cuadro para escribir encima. */
   const onEditClick = (e: React.MouseEvent) => {
     if (tool !== "edit") return;
-    const span = (e.target as HTMLElement).closest(".textLayer span:not(.markedContent)") as HTMLElement | null;
-    const pageEl = (e.target as HTMLElement).closest("[data-key]") as HTMLElement | null;
-    if (!span || !pageEl) return;
+    const target = e.target as HTMLElement;
+    if (target.closest(".form-layer input, .form-layer textarea, .form-layer select, .overlay .annot, .ftext, .note-popup")) return;
+    const span = target.closest(".textLayer span:not(.markedContent)") as HTMLElement | null;
+    const pageEl = target.closest("[data-key]") as HTMLElement | null;
+    if (!pageEl) return;
     const key = pageEl.dataset.key!;
     const vp = viewports.current.get(key);
     if (!vp) return;
     const b = pageEl.querySelector(".page-canvas")!.getBoundingClientRect();
-    const cr = span.getBoundingClientRect();
-    const [x1, y1] = vp.convertToPdfPoint(cr.left - b.left, cr.top - b.top);
-    const [x2, y2] = vp.convertToPdfPoint(cr.right - b.left, cr.bottom - b.top);
-    const r: Rect = [Math.min(x1, x2) - 1, Math.min(y1, y2) - 1, Math.max(x1, x2) + 2, Math.max(y1, y2) + 1];
-    const size = Math.max(4, Math.round((r[3] - r[1]) * 0.78 * 2) / 2);
-    const text = span.dataset.orig ?? span.textContent ?? "";
-    const serif = /serif|times/i.test(span.style.fontFamily) && !/sans/i.test(span.style.fontFamily);
-    addAnnot(
-      key,
-      { id: uid("a"), type: "text", rect: r, text, size, font: serif ? "Times-Roman" : "Helvetica", color: "#000000", opacity: 1, bg: "#ffffff", flatten: true, author: style.author, created: Date.now() },
-      true,
-    );
+    if (e.clientX < b.left || e.clientX > b.right || e.clientY < b.top || e.clientY > b.bottom) return;
+    if (span) {
+      const cr = span.getBoundingClientRect();
+      const [x1, y1] = vp.convertToPdfPoint(cr.left - b.left, cr.top - b.top);
+      const [x2, y2] = vp.convertToPdfPoint(cr.right - b.left, cr.bottom - b.top);
+      const r: Rect = [Math.min(x1, x2) - 1, Math.min(y1, y2) - 1, Math.max(x1, x2) + 2, Math.max(y1, y2) + 1];
+      const size = Math.max(4, Math.round((r[3] - r[1]) * 0.78 * 2) / 2);
+      const text = span.dataset.orig ?? span.textContent ?? "";
+      const serif = /serif|times/i.test(span.style.fontFamily) && !/sans/i.test(span.style.fontFamily);
+      const bg = canvasColorAt(pageEl, cr.left, cr.top, cr.right, cr.bottom);
+      addAnnot(key, { id: uid("a"), type: "text", rect: r, text, size, font: serif ? "Times-Roman" : "Helvetica", color: "#000000", opacity: 1, bg, flatten: true, author: style.author, created: Date.now() }, true);
+      return;
+    }
+    // Sin texto detectable: cuadro para escribir encima, con el fondo de ese punto.
+    const size = style.size || 11;
+    const [px, py] = vp.convertToPdfPoint(e.clientX - b.left, e.clientY - b.top);
+    const r: Rect = [px - 2, py - size * 0.7, px + 160, py + size * 0.9];
+    const bg = canvasColorAt(pageEl, e.clientX - 3, e.clientY - 3, e.clientX + 3, e.clientY + 3);
+    addAnnot(key, { id: uid("a"), type: "text", rect: r, text: "", size, font: style.font, color: "#000000", opacity: 1, bg, flatten: true, author: style.author, created: Date.now() }, true);
   };
 
   const placeStamp = (label: string, color: string) => {
@@ -924,7 +960,7 @@ export default function App() {
                       viewports.current.set(p.key, vp);
                       return (
                         <>
-                          {src && p.kind === "src" && tool === "select" && (
+                          {src && p.kind === "src" && (tool === "select" || tool === "edit") && (
                             <FormLayer
                               viewport={vp}
                               source={src}

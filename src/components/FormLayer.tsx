@@ -19,6 +19,7 @@ interface Widget {
   options?: { exportValue: string; displayValue: string }[];
   readOnly?: boolean;
   maxLen?: number;
+  comb?: boolean;
   textAlignment?: number;
   password?: boolean;
 }
@@ -88,7 +89,7 @@ export function FormLayer({ viewport, source, index, values, onChange, unlock, o
           const value = stored !== undefined ? String(stored) : typeof w.fieldValue === "string" ? w.fieldValue : "";
           const props = {
             className: "fl-input",
-            style: { ...style, textAlign: (["left", "center", "right"] as const)[w.textAlignment ?? 0] },
+            style: combStyle(w, style),
             value,
             disabled: w.readOnly && !unlock,
             maxLength: w.maxLen || undefined,
@@ -129,4 +130,18 @@ export function FormLayer({ viewport, source, index, values, onChange, unlock, o
       })}
     </div>
   );
+}
+
+/** Estilo del control: los campos "por casillas" (comb) reparten cada carácter en su celda. */
+function combStyle(w: Widget, style: React.CSSProperties): React.CSSProperties {
+  const base = { ...style, textAlign: (["left", "center", "right"] as const)[w.textAlignment ?? 0] };
+  if (!w.comb || !w.maxLen || w.multiLine) return base;
+  const width = Number(style.width) || 0;
+  const fs = Math.min(Number(style.fontSize) || 12, (width / w.maxLen) * 1.1);
+  const cell = width / w.maxLen;
+  const charW = fs * 0.6; // fuente monoespaciada (Courier: 0,6 em por carácter)
+  const padL = Math.max(0, (cell - charW) / 2);
+  // CSS añade el espaciado también tras el último carácter: se descuenta para que no se desplace el texto.
+  const ls = Math.max(0, (width - 2 - padL - w.maxLen * charW) / w.maxLen);
+  return { ...base, textAlign: "left", fontFamily: "'Courier New', Courier, monospace", fontSize: fs, letterSpacing: ls, paddingLeft: padL, paddingRight: 0 };
 }
